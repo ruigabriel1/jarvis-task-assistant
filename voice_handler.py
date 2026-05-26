@@ -756,9 +756,46 @@ class VoiceHandler:
                 self.speak("E mais algumas outras na lista.")
             return
 
-        # --- CHATBOT LLM FALLBACK ---
-        self.log(f"Frase tratada como pergunta: \"{text}\"")
-        self.handle_question(text)
+        # --- FALLBACK: ADD TASK DIRECTLY ---
+        content = cmd_text
+        
+        # Clean common prefixes if present
+        for prefix in ["adicionar ", "crie ", "criar ", "anotar ", "adicione ", "insira ", "inserir ", "a tarefa ", "tarefa ", "uma tarefa "]:
+            if content.lower().startswith(prefix):
+                content = content[len(prefix):].strip()
+                break
+
+        if not content:
+            self.speak("O que deseja adicionar, senhor?")
+            return
+
+        priority = "Média"
+        lower_content = content.lower()
+        if "prioridade alta" in lower_content:
+            priority = "Alta"
+            content = re.sub(r'com prioridade alta|prioridade alta', '', content, flags=re.IGNORECASE).strip()
+        elif "prioridade média" in lower_content or "prioridade media" in lower_content:
+            priority = "Média"
+            content = re.sub(r'com prioridade média|com prioridade media|prioridade média|prioridade media', '', content, flags=re.IGNORECASE).strip()
+        elif "prioridade baixa" in lower_content:
+            priority = "Baixa"
+            content = re.sub(r'com prioridade baixa|prioridade baixa', '', content, flags=re.IGNORECASE).strip()
+
+        if content.lower().endswith(" com"):
+            content = content[:-4].strip()
+
+        def add_cb(tasks_list):
+            new_id = max([t.get("id", 0) for t in tasks_list] + [0]) + 1
+            new_task = {"id": new_id, "text": content, "completed": False, "priority": priority}
+            tasks_list.append(new_task)
+            return tasks_list
+
+        if self.task_manager.update_tasks(add_cb):
+            self.log(f"Adicionada por fallback de voz: {content}")
+            self.speak(f"Adicionada: {content}.")
+            if self.gui_callback:
+                self.gui_callback("refresh")
+        return
 
     def handle_question(self, question):
         api_key = os.environ.get("GEMINI_API_KEY", "")

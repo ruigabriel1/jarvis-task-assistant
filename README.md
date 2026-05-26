@@ -16,7 +16,7 @@ O **Jarvis Task Assistant** é um aplicativo desktop de notas e gerenciamento de
 *   **🔢 Comandos de Voz Baseados em Índices:** Permite concluir, excluir ou editar notas falando o número de exibição atual da tela (ex: *"Concluir a tarefa número 2"*, *"Apagar a 1"*), com remoção inteligente de múltiplos prefixos encadeados.
 *   **✎ Edição Manual Inline:** Cards de tarefas dinâmicos com botão de lápis `✎`. Permite editar textos e prioridades inline com atalhos intuitivos de teclado (`Enter` para salvar, `Esc` para cancelar).
 *   **⚙️ Sincronização e Bloqueio Concorrente:** Durante a digitação manual, o app bloqueia temporariamente atualizações de tela por comandos de voz, garantindo que o seu texto não seja sobrescrito.
-*   **🤖 Chatbot Inteligente com Gemini 1.5 Flash:** Fallback de voz automático. Se você fizer uma pergunta que não seja um comando (ex: *"Como está o tempo hoje?"* ou *"Quem foi Alan Turing?"*), o Jarvis consulta o modelo da Google e responde por voz.
+*   **⚡ Adição Instantânea:** Se você disser qualquer frase que não corresponda a um comando estruturado (como "comprar café" ou "ir ao mercado"), o Jarvis a adicionará diretamente como uma nova tarefa de forma rápida e imediata, sem chamadas ou pesquisas externas.
 *   **🔒 Arquitetura Thread-Safe e Escrita Atômica:** Utiliza travas de concorrência (`RLock`) e leitura-escrita em transação atômica (`update_tasks`), prevenindo corrupção de dados entre a thread de voz e a GUI.
 
 ---

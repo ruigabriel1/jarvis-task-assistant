@@ -174,10 +174,13 @@ class TestVoiceHandler(unittest.TestCase):
         task2 = next(t for t in tasks if t["id"] == 2)
         self.assertTrue(task2["completed"])
 
-    def test_fallback_to_gemini(self):
-        # Unrecognized phrase should trigger LLM fallback (handle_question)
-        self.handler.process_phrase("Quem é o presidente do Brasil?")
-        self.handler.handle_question.assert_called_once_with("Quem é o presidente do Brasil?")
+    def test_fallback_to_add_task(self):
+        # Unrecognized phrase should trigger direct task addition
+        self.handler.process_phrase("Estudar para a prova")
+        tasks = self.get_tasks()
+        self.assertEqual(len(tasks), 4)
+        self.assertEqual(tasks[-1]["text"], "Estudar para a prova")
+        self.assertEqual(tasks[-1]["priority"], "Média")
 
     def test_resolve_whisper_params_cpu(self):
         self.handler.whisper_device = "cpu"

@@ -48,8 +48,8 @@ O assistente possui dois modos de voz:
   - *"Número 2 como prioridade alta"*
 * **Listar Tarefas:**
   - *"Quais são minhas tarefas?"* ou *"O que eu tenho para fazer?"*
-* **Dúvidas Gerais (Gemini Integration):**
-  - Quando você fizer uma pergunta de conhecimento geral (Ex: *"Quem foi Alan Turing?"* ou *"Qual a previsão do tempo para amanhã?"*), o Jarvis buscará a resposta usando a IA do Gemini e responderá por voz.
+* **Adição Instantânea (Sem Verbo):**
+  - Qualquer frase dita que não corresponda a nenhum dos comandos acima (concluir, excluir, etc.) é interpretada como o texto de uma nova tarefa e adicionada instantaneamente. Exemplo: *"ir à academia"* criará a tarefa "ir à academia" de forma imediata e direta.
 
 ---
 
