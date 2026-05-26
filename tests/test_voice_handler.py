@@ -1,4 +1,7 @@
+import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -7,7 +10,7 @@ from task_manager import TaskManager
 
 class TestVoiceHandler(unittest.TestCase):
     def setUp(self):
-        self.test_tasks_file = "test_tasks.db"
+        self.test_tasks_file = os.path.join(os.path.dirname(__file__), "test_tasks.db")
         if os.path.exists(self.test_tasks_file):
             try:
                 os.remove(self.test_tasks_file)

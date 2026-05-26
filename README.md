@@ -28,7 +28,7 @@ O **Jarvis Task Assistant** é um aplicativo desktop de notas e gerenciamento de
 *   **Reconhecimento de Voz:** SpeechRecognition (com API do Google Speech em segundo plano)
 *   **Síntese de Voz (TTS):** pyttsx3 (Sintetizador nativo offline do Windows, sem necessidade de internet para falas básicas)
 *   **Integração IA:** Google Generative AI API (Gemini 1.5 Flash)
-*   **Gerenciador de Tarefas:** JSON Database com persistência thread-safe.
+*   **Gerenciador de Tarefas:** SQLite Database com persistência thread-safe.
 
 ---
 
@@ -36,15 +36,22 @@ O **Jarvis Task Assistant** é um aplicativo desktop de notas e gerenciamento de
 
 ```text
 jarvis-task-assistant/
-├── app.pyw                  # Interface gráfica (CustomTkinter) sem janela de terminal
-├── voice_handler.py          # Gerenciamento de voz, thread dedicada de áudio e LLM fallback
-├── task_manager.py           # Leitura, escrita e transações atômicas no banco JSON
-├── test_voice_handler.py     # Suite de 17 testes de unidade para validação offline
-├── config.json               # Configuração da chave de API do Gemini (excluído do git em prod)
-├── tasks.json                # Banco de dados persistente das notas/tarefas
-├── start-jarvis.bat          # Script de inicialização portátil do Windows
-├── jarvis.log                # Registro de execução em tempo real para auditorias
-└── qa_report.md              # Relatório detalhado de QA e análise estática do subagente
+├── data/                    # Banco de dados e backups
+│   ├── tasks.db             # Banco de dados relacional SQLite
+│   └── tasks.json.bak       # Backup da base antiga
+├── logs/                    # Arquivos de log de execução
+│   └── jarvis.log           # Log do assistente
+├── scripts/                 # Scripts utilitários e de execução
+│   └── start-jarvis.bat     # Script de inicialização portátil
+├── tests/                   # Arquivos de testes de unidade
+│   └── test_voice_handler.py# Suite de testes
+├── app.pyw                  # Interface gráfica (CustomTkinter)
+├── voice_handler.py         # Módulo de áudio/voz e Gemini fallback
+├── task_manager.py          # Leitura e escrita no SQLite
+├── config.json              # Chave de API, hotkey e configurações Whisper (ignorado no git)
+├── README.md                # Apresentação do projeto (na raiz)
+├── walkthrough.md           # Manual de uso detalhado (na raiz)
+└── qa_report.md             # Relatório detalhado de QA na raiz
 ```
 
 ---
@@ -67,7 +74,7 @@ Crie um arquivo chamado `config.json` na raiz da pasta do projeto e adicione sua
 ```
 
 ### Passo 3: Iniciar o Jarvis
-Dê duplo clique no arquivo **`start-jarvis.bat`**. O aplicativo abrirá em segundo plano silenciosamente.
+Dê duplo clique no arquivo **`scripts/start-jarvis.bat`**. O aplicativo abrirá em segundo plano silenciosamente.
 
 ---
 
@@ -77,7 +84,7 @@ Para fazer o Jarvis iniciar automaticamente sempre que você ligar o computador,
 
 1.  Pressione as teclas **`Win + R`** no seu teclado para abrir a caixa de diálogo "Executar".
 2.  Digite **`shell:startup`** e pressione **`Enter`**. Isso abrirá a pasta de *Inicialização* do Windows.
-3.  Vá até a pasta do projeto `jarvis-task-assistant`.
+3.  Vá até a subpasta `scripts` dentro da pasta do projeto `jarvis-task-assistant`.
 4.  Clique com o **botão direito** no arquivo **`start-jarvis.bat`** e escolha **Criar Atalho**.
 5.  **Recorte** o atalho criado e **cole** dentro da pasta de *Inicialização* que foi aberta no passo 2.
 6.  Pronto! Na próxima vez que o Windows iniciar, o Jarvis será carregado silenciosamente em segundo plano.
@@ -105,5 +112,5 @@ Para fazer o Jarvis iniciar automaticamente sempre que você ligar o computador,
 ## 🧪 Rodando os Testes Unitários
 Você pode executar o conjunto de testes unitários offline para garantir que a lógica de voz, parsing de números e filtros continuem funcionando:
 ```bash
-python -m unittest test_voice_handler.py
+python -m unittest tests/test_voice_handler.py
 ```

@@ -11,12 +11,12 @@ Os arquivos do projeto estão localizados em:
 
 1. **`app.pyw`**: A interface gráfica moderna construída com CustomTkinter. Executável sem console de terminal (usa extensão `.pyw`).
 2. **`voice_handler.py`**: O motor de escuta por voz que roda em segundo plano. Processa comandos de voz, gerencia o microfone e integra com a API do Gemini.
-3. **`task_manager.py`**: Gerenciador thread-safe e seguro para leitura e gravação das tarefas em JSON.
-4. **`config.json`**: Contém a configuração da chave da API do Gemini para responder dúvidas.
-5. **`tasks.json`**: Banco de dados das tarefas em formato JSON.
-6. **`start-jarvis.bat`**: Script de inicialização portátil para rodar o Jarvis em segundo plano com um clique.
-7. **`test_voice_handler.py`**: Suite com 17 testes de unidade offline para validar toda a lógica de negócio por comando de voz.
-8. **`jarvis.log`**: Log em tempo real para diagnóstico do assistente.
+3. **`task_manager.py`**: Gerenciador thread-safe e seguro para leitura e gravação das tarefas em SQLite (`data/tasks.db`).
+4. **`config.json`**: Contém a configuração da chave da API do Gemini para responder dúvidas, hotkey e configurações do Whisper.
+5. **`data/tasks.db`**: Banco de dados relacional das tarefas.
+6. **`scripts/start-jarvis.bat`**: Script de inicialização portátil para rodar o Jarvis em segundo plano com um clique.
+7. **`tests/test_voice_handler.py`**: Suite com 24 testes de unidade offline para validar toda a lógica de negócio por comando de voz.
+8. **`logs/jarvis.log`**: Log em tempo real para diagnóstico do assistente.
 
 ---
 
@@ -85,10 +85,10 @@ Além dos comandos de voz, você pode gerenciar suas tarefas manualmente na inte
 ## 🚀 Como Iniciar o Aplicativo
 
 Para iniciar o Jarvis em segundo plano de forma simples e rápida:
-1. Dê dois cliques no arquivo **`start-jarvis.bat`**. Ele abrirá o Jarvis diretamente sem deixar uma janela preta de prompt de comando aberta.
+1. Dê dois cliques no arquivo **`scripts/start-jarvis.bat`**. Ele abrirá o Jarvis diretamente sem deixar uma janela preta de prompt de comando aberta.
 2. Se quiser que o Jarvis seja iniciado automaticamente sempre que ligar o computador (Windows Startup):
    - Pressione `Win + R`, digite `shell:startup` e pressione `Enter`.
-   - Crie um atalho do arquivo `start-jarvis.bat` e cole dentro dessa pasta que foi aberta.
+   - Crie um atalho do arquivo **`scripts/start-jarvis.bat`** e cole dentro dessa pasta que foi aberta.
 
 ---
 
@@ -98,5 +98,5 @@ Você pode rodar a suite de testes a qualquer momento para garantir a estabilida
 1. Abra o Terminal ou PowerShell na pasta do projeto.
 2. Execute o comando:
    ```bash
-   python -m unittest test_voice_handler.py
+   python -m unittest tests/test_voice_handler.py
    ```

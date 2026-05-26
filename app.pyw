@@ -13,7 +13,9 @@ class JarvisApp(ctk.CTk):
         super().__init__()
 
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
-        self.tasks_filepath = os.path.join(self.project_dir, "tasks.db")
+        self.data_dir = os.path.join(self.project_dir, "data")
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.tasks_filepath = os.path.join(self.data_dir, "tasks.db")
 
         # Gerenciador de tarefas thread-safe
         self.task_manager = TaskManager(self.tasks_filepath)

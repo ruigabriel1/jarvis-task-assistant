@@ -1,7 +1,19 @@
 __pycache__/
 config.json
 tasks.json
-jarvis.log
+
+# Ignore sqlite databases
 *.db
 *.db-journal
+data/*.db
+data/*.db-journal
+tests/*.db
+tests/*.db-journal
+
+# Ignore logs
+jarvis.log
+logs/
+
+# Ignore backups
 *.bak
+data/*.bak

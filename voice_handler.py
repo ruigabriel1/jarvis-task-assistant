@@ -32,7 +32,9 @@ class VoiceHandler:
         self.edge_voice = "pt-BR-AntonioNeural"
         
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
-        self.log_filepath = os.path.join(self.project_dir, "jarvis.log")
+        self.log_dir = os.path.join(self.project_dir, "logs")
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.log_filepath = os.path.join(self.log_dir, "jarvis.log")
         
         try:
             with open(self.log_filepath, 'w', encoding='utf-8') as f:
