@@ -176,5 +176,57 @@ class TestVoiceHandler(unittest.TestCase):
         self.handler.process_phrase("Quem é o presidente do Brasil?")
         self.handler.handle_question.assert_called_once_with("Quem é o presidente do Brasil?")
 
+    def test_resolve_whisper_params_cpu(self):
+        self.handler.whisper_device = "cpu"
+        self.handler.whisper_compute_type = "auto"
+        device, compute_type = self.handler._resolve_whisper_params()
+        self.assertEqual(device, "cpu")
+        self.assertEqual(compute_type, "int8")
+
+    def test_resolve_whisper_params_cuda(self):
+        self.handler.whisper_device = "cuda"
+        self.handler.whisper_compute_type = "auto"
+        device, compute_type = self.handler._resolve_whisper_params()
+        self.assertEqual(device, "cuda")
+        self.assertEqual(compute_type, "float16")
+
+    def test_transcribe_google_fallback(self):
+        # With whisper not loaded, it should fall back to google
+        self.handler.speech_engine = "faster-whisper"
+        self.handler.whisper_loaded = False
+        
+        mock_audio = MagicMock()
+        self.handler.recognizer.recognize_google = MagicMock(return_value=" teste google ")
+        
+        result = self.handler._transcribe(mock_audio)
+        self.assertEqual(result, "teste google")
+        self.handler.recognizer.recognize_google.assert_called_once_with(mock_audio, language="pt-BR")
+
+    def test_speak_edge_tts_success(self):
+        from unittest.mock import patch, MagicMock
+        with patch('voice_handler.HAS_EDGE_TTS', True), \
+             patch('asyncio.run') as mock_run, \
+             patch('os.path.exists', return_value=True), \
+             patch('os.path.getsize', return_value=100), \
+             patch('os.remove') as mock_remove:
+            
+            self.handler._play_audio = MagicMock()
+            
+            # Call _speak_edge_tts
+            res = self.handler._speak_edge_tts("Olá, senhor.")
+            
+            self.assertTrue(res)
+            self.handler._play_audio.assert_called_once()
+            mock_run.assert_called_once()
+            mock_remove.assert_called_once()
+
+    def test_speak_edge_tts_failure_exception(self):
+        from unittest.mock import patch, MagicMock
+        with patch('voice_handler.HAS_EDGE_TTS', True), \
+             patch('asyncio.run', side_effect=Exception("Network error")):
+            
+            res = self.handler._speak_edge_tts("Olá, senhor.")
+            self.assertFalse(res)
+
 if __name__ == "__main__":
     unittest.main()

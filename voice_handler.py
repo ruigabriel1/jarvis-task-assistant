@@ -9,6 +9,14 @@ import speech_recognition as sr
 import pyttsx3
 import pythoncom
 import re
+import asyncio
+import tempfile
+
+try:
+    import edge_tts
+    HAS_EDGE_TTS = True
+except ImportError:
+    HAS_EDGE_TTS = False
 
 class VoiceHandler:
     def __init__(self, task_manager, gui_callback=None, start_listening=True):
@@ -16,6 +24,7 @@ class VoiceHandler:
         self.gui_callback = gui_callback
         self.active_mode = False
         self.running = True
+        self.edge_voice = "pt-BR-AntonioNeural"
         
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
         self.log_filepath = os.path.join(self.project_dir, "jarvis.log")
@@ -38,7 +47,34 @@ class VoiceHandler:
         self.mic_available = False
         self.stop_listening_fn = None
 
+        # Configurações do motor de reconhecimento de voz
+        self.speech_engine = "google"
+        self.whisper_model_name = "tiny"
+        self.whisper_device = "auto"
+        self.whisper_compute_type = "auto"
+        self.whisper_model = None
+        self.whisper_loading = False
+        self.whisper_loaded = False
+
         if start_listening:
+            # Carregar configurações do config.json
+            config_path = os.path.join(self.project_dir, "config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                        self.speech_engine = config.get("speech_engine", "auto")
+                        self.whisper_model_name = config.get("whisper_model", "tiny")
+                        self.whisper_device = config.get("whisper_device", "auto")
+                        self.whisper_compute_type = config.get("whisper_compute_type", "auto")
+                except Exception as e:
+                    self.log(f"Erro ao ler config.json para inicialização de voz: {e}")
+
+            # Inicializa Whisper em segundo plano se configurado
+            if self.speech_engine in ["faster-whisper", "auto"]:
+                self.whisper_loading = True
+                threading.Thread(target=self._init_whisper_backend, daemon=True).start()
+
             try:
                 self.microphone = sr.Microphone()
                 with self.microphone as source:
@@ -54,6 +90,93 @@ class VoiceHandler:
             except Exception as e:
                 self.log(f"ERRO ao inicializar microfone: {e}")
 
+    def _resolve_whisper_params(self):
+        device = self.whisper_device
+        compute_type = self.whisper_compute_type
+
+        if device == "auto":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    self.log("GPU com suporte CUDA detectada para Whisper.")
+                else:
+                    device = "cpu"
+                    self.log("GPU não detectada. Utilizando CPU para Whisper.")
+            except ImportError:
+                device = "cpu"
+                self.log("PyTorch não importado. Utilizando CPU para Whisper.")
+
+        if compute_type == "auto":
+            if device == "cuda":
+                compute_type = "float16"
+            else:
+                compute_type = "int8"
+
+        return device, compute_type
+
+    def _init_whisper_backend(self):
+        self.log("Iniciando carregamento do motor faster-whisper em segundo plano...")
+        try:
+            from faster_whisper import WhisperModel
+            import numpy as np # Garante que numpy está disponível
+            
+            device, compute_type = self._resolve_whisper_params()
+            
+            self.log(f"Carregando modelo '{self.whisper_model_name}' (device={device}, compute_type={compute_type})...")
+            self.whisper_model = WhisperModel(
+                self.whisper_model_name,
+                device=device,
+                compute_type=compute_type
+            )
+            self.whisper_loaded = True
+            self.whisper_loading = False
+            self.log(f"Motor faster-whisper carregado com sucesso. Modelo: {self.whisper_model_name}")
+        except ImportError as e:
+            self.whisper_loading = False
+            self.log(f"faster-whisper ou dependência não instalada. Erro: {e}")
+            if self.speech_engine == "faster-whisper":
+                self.speak("Aviso: Motor de voz offline não está disponível. Usando modo online.")
+        except Exception as e:
+            self.whisper_loading = False
+            self.log(f"Erro ao inicializar o modelo faster-whisper '{self.whisper_model_name}': {e}")
+            if self.speech_engine == "faster-whisper":
+                self.speak("Aviso: Falha ao carregar o modelo de voz offline. Usando modo online.")
+
+    def _transcribe(self, audio):
+        use_whisper = False
+        if self.speech_engine == "faster-whisper":
+            if self.whisper_loaded:
+                use_whisper = True
+            else:
+                self.log("Whisper configurado mas ainda não carregado ou falhou. Tentando Google...")
+        elif self.speech_engine == "auto":
+            if self.whisper_loaded:
+                use_whisper = True
+
+        if use_whisper:
+            try:
+                self.log("Transcrevendo com motor offline (faster-whisper)...")
+                import numpy as np
+                raw_data = audio.get_raw_data(convert_rate=16000, convert_width=2)
+                audio_np = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
+                
+                # Executa transcrição no idioma português
+                segments, info = self.whisper_model.transcribe(
+                    audio_np,
+                    beam_size=5,
+                    language="pt"
+                )
+                
+                text = "".join(segment.text for segment in segments).strip()
+                return text
+            except Exception as e:
+                self.log(f"Erro na transcrição do faster-whisper: {e}. Tentando fallback online...")
+
+        # Fallback para o reconhecedor online do Google
+        self.log("Transcrevendo com motor online (Google)...")
+        return self.recognizer.recognize_google(audio, language="pt-BR").strip()
+
     def log(self, message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
@@ -62,26 +185,106 @@ class VoiceHandler:
         except Exception:
             pass
 
+    def _play_audio(self, filepath):
+        if os.name == 'nt':
+            import ctypes
+            size = 256
+            buffer = ctypes.create_unicode_buffer(size)
+            ctypes.windll.kernel32.GetShortPathNameW(filepath, buffer, size)
+            short_path = buffer.value or filepath
+            
+            alias = f"jarvis_play_{int(time.time() * 1000)}"
+            winmm = ctypes.windll.winmm
+            try:
+                winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+                res = winmm.mciSendStringW(f'open "{short_path}" type mpegvideo alias {alias}', None, 0, 0)
+                if res != 0:
+                    raise RuntimeError(f"MCI open error: {res}")
+                res = winmm.mciSendStringW(f'play {alias} wait', None, 0, 0)
+                if res != 0:
+                    raise RuntimeError(f"MCI play error: {res}")
+            finally:
+                winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+        else:
+            import subprocess
+            if hasattr(os, 'uname'):
+                sysname = os.uname().sysname
+            else:
+                sysname = ''
+            
+            if sysname == 'Darwin':
+                subprocess.run(['afplay', filepath], check=True)
+            else:
+                for player in ['mpg123', 'mpv', 'play']:
+                    try:
+                        subprocess.run([player, filepath], check=True)
+                        break
+                    except FileNotFoundError:
+                        continue
+
+    def _speak_edge_tts(self, text):
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(temp_dir, f"jarvis_tts_{int(time.time() * 1000)}.mp3")
+        try:
+            async def generate():
+                communicate = edge_tts.Communicate(text, self.edge_voice)
+                await communicate.save(temp_file)
+                
+            asyncio.run(generate())
+            
+            if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                self._play_audio(temp_file)
+                return True
+            return False
+        except Exception as e:
+            self.log(f"Falha ao gerar/tocar áudio edge-tts: {e}")
+            return False
+        finally:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
+
     def _speech_worker(self):
         pythoncom.CoInitialize()
         try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 175)
-            voices = engine.getProperty('voices')
+            pyttsx3_engine = pyttsx3.init()
+            pyttsx3_engine.setProperty('rate', 175)
+            voices = pyttsx3_engine.getProperty('voices')
             for voice in voices:
                 if any(x in voice.id.upper() for x in ['PT', 'PORTUGUESE', 'BRAZIL']):
-                    engine.setProperty('voice', voice.id)
+                    pyttsx3_engine.setProperty('voice', voice.id)
                     break
         except Exception as e:
             self.log(f"ERRO no pyttsx3: {e}")
-            engine = None
+            pyttsx3_engine = None
 
         while self.running:
             try:
                 text = self.speech_queue.get(timeout=1.0)
-                if engine and text:
-                    engine.say(text)
-                    engine.runAndWait()
+                if not text:
+                    self.speech_queue.task_done()
+                    continue
+                
+                success = False
+                if HAS_EDGE_TTS:
+                    try:
+                        success = self._speak_edge_tts(text)
+                    except Exception as e:
+                        self.log(f"Erro durante execução do edge-tts: {e}")
+                        success = False
+                
+                if not success:
+                    if pyttsx3_engine:
+                        try:
+                            pyttsx3_engine.say(text)
+                            pyttsx3_engine.runAndWait()
+                        except Exception as e:
+                            self.log(f"ERRO no pyttsx3 fallback: {e}")
+                    else:
+                        self.log("Nenhum sintetizador de voz disponível.")
+                
                 self.speech_queue.task_done()
             except queue.Empty:
                 continue
@@ -102,7 +305,10 @@ class VoiceHandler:
         if not self.running:
             return
         try:
-            text = recognizer.recognize_google(audio, language="pt-BR").strip()
+            text = self._transcribe(audio)
+            if not text:
+                self.log("Áudio não reconhecido (retornou vazio).")
+                return
             self.log(f"Reconhecido: \"{text}\"")
             self.process_phrase(text)
         except sr.UnknownValueError:
