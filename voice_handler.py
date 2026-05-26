@@ -18,6 +18,11 @@ try:
 except ImportError:
     HAS_EDGE_TTS = False
 
+try:
+    import keyboard
+except ImportError:
+    keyboard = None
+
 class VoiceHandler:
     def __init__(self, task_manager, gui_callback=None, start_listening=True):
         self.task_manager = task_manager
@@ -47,7 +52,8 @@ class VoiceHandler:
         self.mic_available = False
         self.stop_listening_fn = None
 
-        # Configurações do motor de reconhecimento de voz
+        # Configurações do motor de reconhecimento de voz e hotkey
+        self.hotkey = "ctrl+shift+j"
         self.speech_engine = "google"
         self.whisper_model_name = "tiny"
         self.whisper_device = "auto"
@@ -56,20 +62,21 @@ class VoiceHandler:
         self.whisper_loading = False
         self.whisper_loaded = False
 
-        if start_listening:
-            # Carregar configurações do config.json
-            config_path = os.path.join(self.project_dir, "config.json")
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, 'r', encoding='utf-8') as f:
-                        config = json.load(f)
-                        self.speech_engine = config.get("speech_engine", "auto")
-                        self.whisper_model_name = config.get("whisper_model", "tiny")
-                        self.whisper_device = config.get("whisper_device", "auto")
-                        self.whisper_compute_type = config.get("whisper_compute_type", "auto")
-                except Exception as e:
-                    self.log(f"Erro ao ler config.json para inicialização de voz: {e}")
+        # Carregar configurações do config.json
+        config_path = os.path.join(self.project_dir, "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.hotkey = config.get("HOTKEY", "ctrl+shift+j")
+                    self.speech_engine = config.get("speech_engine", "auto")
+                    self.whisper_model_name = config.get("whisper_model", "tiny")
+                    self.whisper_device = config.get("whisper_device", "auto")
+                    self.whisper_compute_type = config.get("whisper_compute_type", "auto")
+            except Exception as e:
+                self.log(f"Erro ao ler config.json: {e}")
 
+        if start_listening:
             # Inicializa Whisper em segundo plano se configurado
             if self.speech_engine in ["faster-whisper", "auto"]:
                 self.whisper_loading = True
@@ -89,6 +96,14 @@ class VoiceHandler:
                 self.log("Escuta contínua de fundo ativada.")
             except Exception as e:
                 self.log(f"ERRO ao inicializar microfone: {e}")
+
+        self.hotkey_hook = None
+        if start_listening and keyboard:
+            try:
+                self.hotkey_hook = keyboard.add_hotkey(self.hotkey, self.toggle_active)
+                self.log(f"Hotkey global '{self.hotkey}' registrada com sucesso.")
+            except Exception as e:
+                self.log(f"Erro ao registrar hotkey global '{self.hotkey}': {e}")
 
     def _resolve_whisper_params(self):
         device = self.whisper_device
@@ -802,4 +817,10 @@ class VoiceHandler:
         self.running = False
         if self.stop_listening_fn:
             self.stop_listening_fn(wait_for_stop=False)
+        if self.hotkey_hook and keyboard:
+            try:
+                keyboard.remove_hotkey(self.hotkey_hook)
+                self.log("Hotkey global removida.")
+            except Exception as e:
+                self.log(f"Erro ao remover hotkey global: {e}")
         self.log("VoiceHandler encerrado.")

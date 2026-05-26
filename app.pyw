@@ -13,7 +13,7 @@ class JarvisApp(ctk.CTk):
         super().__init__()
 
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
-        self.tasks_filepath = os.path.join(self.project_dir, "tasks.json")
+        self.tasks_filepath = os.path.join(self.project_dir, "tasks.db")
 
         # Gerenciador de tarefas thread-safe
         self.task_manager = TaskManager(self.tasks_filepath)
@@ -35,6 +35,7 @@ class JarvisApp(ctk.CTk):
 
         self.create_widgets()
         self.voice_handler = VoiceHandler(self.task_manager, self.on_voice_event)
+        self.update_status(self.voice_handler.active_mode)
         self.refresh_tasks()
         
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -151,15 +152,16 @@ class JarvisApp(ctk.CTk):
             self.after(0, self.show_connection_error)
 
     def update_status(self, is_active):
+        hk_display = self.voice_handler.hotkey.title() if hasattr(self, 'voice_handler') else "Ctrl+Shift+J"
         if is_active:
             self.status_label.configure(
-                text="Modo: Ativo (Ouvindo comandos. Diga \"Desligar Jarvis\" para silenciar)",
+                text=f"Modo: Ativo (Ouvindo comandos. Pressione {hk_display} ou diga \"Desligar Jarvis\" para silenciar)",
                 text_color=self.accent_color
             )
             self.draw_indicator(self.accent_color)
         else:
             self.status_label.configure(
-                text="Modo: Inativo (Diga \"Ligar Jarvis\" ou clique no indicador para ativar)",
+                text=f"Modo: Inativo (Diga \"Ligar Jarvis\", clique no indicador ou pressione {hk_display} para ativar)",
                 text_color="#8E8E93"
             )
             self.draw_indicator("#3A3A3C")

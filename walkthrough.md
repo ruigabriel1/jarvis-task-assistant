@@ -53,6 +53,21 @@ O assistente possui dois modos de voz:
 
 ---
 
+## ⌨️ Atalho de Teclado Global (Global Hotkey)
+
+Você pode alternar o estado de escuta do Jarvis de qualquer janela ativa no sistema operacional utilizando um atalho de teclado global:
+* **Atalho Padrão:** `Ctrl+Shift+J` (alterna entre os modos Ativo e Inativo).
+* **Personalização:** Você pode configurar um atalho diferente definindo a propriedade `"HOTKEY"` no arquivo `config.json`. Por exemplo:
+  ```json
+  {
+    "GEMINI_API_KEY": "sua-chave",
+    "HOTKEY": "ctrl+alt+j"
+  }
+  ```
+  *(Nota: Utilize combinações válidas suportadas pela biblioteca `keyboard`, como `ctrl+shift+k`, `ctrl+alt+space`, etc.)*
+
+---
+
 ## ✎ Edição Manual Inline (Interface Gráfica)
 
 Além dos comandos de voz, você pode gerenciar suas tarefas manualmente na interface visual:

@@ -4,3 +4,4 @@ tasks.json
 jarvis.log
 *.db
 *.db-journal
+*.bak

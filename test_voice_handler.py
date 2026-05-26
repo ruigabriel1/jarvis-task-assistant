@@ -1,13 +1,13 @@
 import os
 import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from voice_handler import VoiceHandler
 from task_manager import TaskManager
 
 class TestVoiceHandler(unittest.TestCase):
     def setUp(self):
-        self.test_tasks_file = "test_tasks.json"
+        self.test_tasks_file = "test_tasks.db"
         if os.path.exists(self.test_tasks_file):
             try:
                 os.remove(self.test_tasks_file)
@@ -227,6 +227,25 @@ class TestVoiceHandler(unittest.TestCase):
             
             res = self.handler._speak_edge_tts("Olá, senhor.")
             self.assertFalse(res)
+
+    def test_hotkey_config_default(self):
+        # Hotkey should default to ctrl+shift+j
+        self.assertEqual(self.handler.hotkey, "ctrl+shift+j")
+
+    @patch('voice_handler.keyboard')
+    @patch('voice_handler.sr.Microphone')
+    @patch('voice_handler.sr.Recognizer')
+    def test_hotkey_registration_on_start_listening(self, mock_recognizer, mock_mic, mock_keyboard):
+        # Test hotkey registration when start_listening is True
+        mock_keyboard.add_hotkey.return_value = "mock_hook"
+        
+        handler = VoiceHandler(self.task_manager, self.gui_callback, start_listening=True)
+        self.assertEqual(handler.hotkey_hook, "mock_hook")
+        mock_keyboard.add_hotkey.assert_called_once_with(handler.hotkey, handler.toggle_active)
+        
+        # When closing, it should remove the hotkey
+        handler.close()
+        mock_keyboard.remove_hotkey.assert_called_once_with("mock_hook")
 
 if __name__ == "__main__":
     unittest.main()
