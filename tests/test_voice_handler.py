@@ -213,18 +213,18 @@ class TestVoiceHandler(unittest.TestCase):
         with patch('voice_handler.HAS_EDGE_TTS', True), \
              patch('asyncio.run') as mock_run, \
              patch('os.path.exists', return_value=True), \
-             patch('os.path.getsize', return_value=100), \
-             patch('os.remove') as mock_remove:
-            
+             patch('os.path.getsize', return_value=100):
+
             self.handler._play_audio = MagicMock()
-            
+
             # Call _speak_edge_tts
             res = self.handler._speak_edge_tts("Olá, senhor.")
-            
+
             self.assertTrue(res)
             self.handler._play_audio.assert_called_once()
             mock_run.assert_called_once()
-            mock_remove.assert_called_once()
+            # Arquivo agora é mantido em cache (não deletado)
+            self.assertIn("Olá, senhor.", self.handler._tts_cache)
 
     def test_speak_edge_tts_failure_exception(self):
         from unittest.mock import patch, MagicMock

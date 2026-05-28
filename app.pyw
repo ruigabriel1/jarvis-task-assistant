@@ -35,6 +35,13 @@ class JarvisApp(ctk.CTk):
         # ID da tarefa atualmente no modo de edição manual inline (None se nenhuma)
         self.editing_task_id = None
 
+        # Estado do drag-and-drop de cards
+        self._card_list = []       # [(task_id, card_frame), ...] na ordem visível atual
+        self._drag_task_id = None
+        self._drag_source_idx = None
+        self._drag_target_idx = None
+        self._drop_indicator = None  # Frame indicador de posição de soltura
+
         self.create_widgets()
         self.voice_handler = VoiceHandler(self.task_manager, self.on_voice_event)
         self.update_status(self.voice_handler.active_mode)
@@ -234,14 +241,114 @@ class JarvisApp(ctk.CTk):
         self.editing_task_id = None
         self.refresh_tasks()
 
+    # ---- Drag-and-drop reorder ----
+
+    def _get_or_create_indicator(self):
+        if self._drop_indicator is None or not self._drop_indicator.winfo_exists():
+            self._drop_indicator = ctk.CTkFrame(
+                self.tasks_container,
+                height=2,
+                corner_radius=0,
+                fg_color=self.accent_color
+            )
+        return self._drop_indicator
+
+    def _hide_indicator(self):
+        if self._drop_indicator and self._drop_indicator.winfo_exists():
+            self._drop_indicator.pack_forget()
+
+    def _drag_start(self, event, task_id):
+        if self.editing_task_id is not None:
+            return
+        self._drag_task_id = task_id
+        for idx, (tid, card) in enumerate(self._card_list):
+            if tid == task_id:
+                self._drag_source_idx = idx
+                self._drag_target_idx = idx
+                break
+        self._update_drag_visuals()
+
+    def _get_drop_index(self, y_root):
+        """Retorna o índice onde o card seria inserido para a posição Y do mouse."""
+        for idx, (tid, card) in enumerate(self._card_list):
+            try:
+                card_mid = card.winfo_rooty() + card.winfo_height() // 2
+                if y_root < card_mid:
+                    return idx
+            except Exception:
+                pass
+        return len(self._card_list)
+
+    def _update_drag_visuals(self):
+        tgt = self._drag_target_idx
+
+        # Atualiza cores das cards (apenas fg_color, sem border)
+        for idx, (tid, card) in enumerate(self._card_list):
+            if tid == self._drag_task_id:
+                card.configure(fg_color="#2A2A2A")
+            else:
+                card.configure(fg_color=self.card_bg_color)
+
+        # Reposiciona o indicador de 2px
+        if not self._card_list:
+            return
+        ind = self._get_or_create_indicator()
+        ind.pack_forget()
+        if tgt < len(self._card_list):
+            ind.pack(fill="x", padx=8, pady=0, before=self._card_list[tgt][1])
+        else:
+            ind.pack(fill="x", padx=8, pady=0, after=self._card_list[-1][1])
+
+    def _drag_motion(self, event):
+        if self._drag_task_id is None:
+            return
+        tgt = self._get_drop_index(event.y_root)
+        if tgt != self._drag_target_idx:
+            self._drag_target_idx = tgt
+            self._update_drag_visuals()
+
+    def _drag_end(self, event):
+        if self._drag_task_id is None:
+            return
+        src = self._drag_source_idx
+        tgt = self._get_drop_index(event.y_root)
+        self._hide_indicator()
+        self._drag_task_id = None
+        self._drag_source_idx = None
+        self._drag_target_idx = None
+        if tgt != src and tgt != src + 1:
+            self._apply_reorder(src, tgt)
+        else:
+            self.refresh_tasks()
+
+    def _apply_reorder(self, src_idx, tgt_idx):
+        task_ids = [tid for tid, _ in self._card_list]
+        moved = task_ids.pop(src_idx)
+        # Ajusta índice de inserção pois removemos o item antes
+        insert_at = tgt_idx if tgt_idx <= src_idx else tgt_idx - 1
+        task_ids.insert(insert_at, moved)
+
+        def reorder_cb(tasks_list):
+            id_to_order = {tid: i * 10 for i, tid in enumerate(task_ids)}
+            for t in tasks_list:
+                if t["id"] in id_to_order:
+                    t["sort_order"] = id_to_order[t["id"]]
+            return tasks_list
+
+        self.task_manager.update_tasks(reorder_cb)
+        self.refresh_tasks()
+
     def refresh_tasks(self):
+        self._hide_indicator()
         for widget in self.tasks_container.winfo_children():
             widget.destroy()
+        self._drop_indicator = None
 
+        self._card_list = []
         tasks = self.task_manager.read_tasks()
         tasks.sort(key=lambda t: (
-            t.get("completed", False), 
-            self.priority_order.get(t.get("priority", "Média"), 2),
+            t.get("completed", False),
+            t.get("sort_order", t.get("id", 0) * 10),
             t.get("id", 0)
         ))
 
@@ -250,7 +357,9 @@ class JarvisApp(ctk.CTk):
             return
 
         for idx, t in enumerate(tasks):
-            self.create_task_card(t, idx + 1)
+            card = self.create_task_card(t, idx + 1)
+            if card is not None:
+                self._card_list.append((t["id"], card))
 
     def show_empty_state(self):
         empty_label = ctk.CTkLabel(
@@ -269,7 +378,7 @@ class JarvisApp(ctk.CTk):
 
         if self.editing_task_id == task["id"]:
             self.edit_task_inline(card, task)
-            return
+            return None
 
         is_completed = task.get("completed", False)
         if is_completed:
@@ -281,6 +390,21 @@ class JarvisApp(ctk.CTk):
             text_font = ctk.CTkFont(family="Segoe UI", size=13)
             priority_colors = {"Alta": "#FF453A", "Média": "#FF9F0A", "Baixa": "#8E8E93"}
             p_color = priority_colors.get(task.get("priority", "Média"), "#8E8E93")
+
+        # Handle de arrasto — usa tk.Label puro para garantir capture de eventos de mouse
+        drag_handle = tk.Label(
+            card,
+            text="⠿",
+            font=("Segoe UI", 14),
+            fg="#636366",
+            bg=self.card_bg_color,
+            cursor="fleur",
+            width=2,
+        )
+        drag_handle.pack(side="left", padx=(5, 0))
+        drag_handle.bind("<ButtonPress-1>", lambda e, tid=task["id"]: self._drag_start(e, tid))
+        drag_handle.bind("<B1-Motion>", self._drag_motion)
+        drag_handle.bind("<ButtonRelease-1>", self._drag_end)
 
         # Número da Tarefa
         num_label = ctk.CTkLabel(
@@ -350,6 +474,8 @@ class JarvisApp(ctk.CTk):
         # Texto da Tarefa
         text_label = ctk.CTkLabel(card, text=task["text"], font=text_font, text_color=text_color, anchor="w")
         text_label.pack(side="left", fill="both", expand=True, padx=5)
+
+        return card
 
     def start_editing(self, task_id):
         self.editing_task_id = task_id

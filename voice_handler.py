@@ -23,6 +23,21 @@ try:
 except ImportError:
     keyboard = None
 
+# Frases fixas pré-geradas no boot para eliminar delay de TTS
+_PREWARM_PHRASES = [
+    "Como posso te ajudar senhor?",
+    "Desligando.",
+    "Pesquisando...",
+    "Não encontrei essa tarefa.",
+    "Não encontrei a tarefa.",
+    "Você não tem tarefas pendentes senhor.",
+    "O que deseja adicionar senhor?",
+    "Qual tarefa deseja concluir senhor?",
+    "Qual tarefa deseja remover senhor?",
+    "Senhor, por favor indique a tarefa antiga e o novo texto usando 'para'.",
+    "Desculpe, senhor. Preciso que configure minha chave da API Gemini no arquivo de configurações.",
+]
+
 class VoiceHandler:
     def __init__(self, task_manager, gui_callback=None, start_listening=True):
         self.task_manager = task_manager
@@ -30,11 +45,15 @@ class VoiceHandler:
         self.active_mode = False
         self.running = True
         self.edge_voice = "pt-BR-AntonioNeural"
+        self._tts_cache = {}  # text -> filepath do MP3 cacheado
+        self._tts_cache_dir = os.path.join(tempfile.gettempdir(), "jarvis_tts_cache")
+        os.makedirs(self._tts_cache_dir, exist_ok=True)
         
         self.project_dir = os.path.dirname(os.path.abspath(__file__))
         self.log_dir = os.path.join(self.project_dir, "logs")
         os.makedirs(self.log_dir, exist_ok=True)
         self.log_filepath = os.path.join(self.log_dir, "jarvis.log")
+        self._log_lock = threading.Lock()
         
         try:
             with open(self.log_filepath, 'w', encoding='utf-8') as f:
@@ -49,7 +68,7 @@ class VoiceHandler:
 
         self.recognizer = sr.Recognizer()
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold = 0.8
+        self.recognizer.pause_threshold = 0.5
         
         self.mic_available = False
         self.stop_listening_fn = None
@@ -93,7 +112,7 @@ class VoiceHandler:
                 self.stop_listening_fn = self.recognizer.listen_in_background(
                     self.microphone, 
                     self.audio_callback,
-                    phrase_time_limit=6
+                    phrase_time_limit=4
                 )
                 self.log("Escuta contínua de fundo ativada.")
             except Exception as e:
@@ -106,6 +125,9 @@ class VoiceHandler:
                 self.log(f"Hotkey global '{self.hotkey}' registrada com sucesso.")
             except Exception as e:
                 self.log(f"Erro ao registrar hotkey global '{self.hotkey}': {e}")
+
+        if start_listening and HAS_EDGE_TTS:
+            threading.Thread(target=self._prewarm_tts_cache, daemon=True).start()
 
     def _resolve_whisper_params(self):
         device = self.whisper_device
@@ -196,11 +218,12 @@ class VoiceHandler:
 
     def log(self, message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            with open(self.log_filepath, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp}] {message}\n")
-        except Exception:
-            pass
+        with self._log_lock:
+            try:
+                with open(self.log_filepath, 'a', encoding='utf-8') as f:
+                    f.write(f"[{timestamp}] {message}\n")
+            except Exception:
+                pass
 
     def _play_audio(self, filepath):
         if os.name == 'nt':
@@ -239,29 +262,61 @@ class VoiceHandler:
                     except FileNotFoundError:
                         continue
 
+    def _tts_cache_path(self, text):
+        """Retorna o caminho do arquivo de cache para um texto."""
+        safe_hash = abs(hash(text)) & 0xFFFFFFFF
+        return os.path.join(self._tts_cache_dir, f"{safe_hash}.mp3")
+
+    def _prewarm_tts_cache(self):
+        """Pré-gera em background os MP3 das frases fixas para eliminar delay de rede no runtime."""
+        if not HAS_EDGE_TTS:
+            return
+        self.log("Iniciando pré-aquecimento do cache TTS...")
+        for phrase in _PREWARM_PHRASES:
+            if not self.running:
+                break
+            cache_file = self._tts_cache_path(phrase)
+            if os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
+                self._tts_cache[phrase] = cache_file
+                continue
+            try:
+                async def gen(p=phrase, f=cache_file):
+                    comm = edge_tts.Communicate(p, self.edge_voice)
+                    await comm.save(f)
+                asyncio.run(gen())
+                if os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
+                    self._tts_cache[phrase] = cache_file
+                    self.log(f"Cache TTS gerado: '{phrase[:40]}...' " if len(phrase) > 40 else f"Cache TTS gerado: '{phrase}'")
+            except Exception as e:
+                self.log(f"Aviso: falha ao pré-gerar cache TTS para '{phrase[:30]}': {e}")
+        self.log("Pré-aquecimento do cache TTS concluído.")
+
     def _speak_edge_tts(self, text):
-        temp_dir = tempfile.gettempdir()
-        temp_file = os.path.join(temp_dir, f"jarvis_tts_{int(time.time() * 1000)}.mp3")
+        # 1. Verifica cache existente — reprodução instantânea
+        cache_file = self._tts_cache_path(text)
+        if text in self._tts_cache and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
+            try:
+                self._play_audio(cache_file)
+                return True
+            except Exception:
+                pass  # fallback para gerar novamente
+
+        # 2. Gera o áudio e armazena em cache permanente
         try:
             async def generate():
                 communicate = edge_tts.Communicate(text, self.edge_voice)
-                await communicate.save(temp_file)
-                
+                await communicate.save(cache_file)
+
             asyncio.run(generate())
-            
-            if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-                self._play_audio(temp_file)
+
+            if os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
+                self._tts_cache[text] = cache_file
+                self._play_audio(cache_file)
                 return True
             return False
         except Exception as e:
             self.log(f"Falha ao gerar/tocar áudio edge-tts: {e}")
             return False
-        finally:
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except Exception:
-                    pass
 
     def _speech_worker(self):
         pythoncom.CoInitialize()
@@ -314,9 +369,9 @@ class VoiceHandler:
 
     def play_chime(self, active):
         if active:
-            self.speak("Jarvis ativo. Sim, senhor?")
+            self.speak("Como posso te ajudar senhor?")
         else:
-            self.speak("Jarvis em repouso.")
+            self.speak("Desligando.")
 
     def audio_callback(self, recognizer, audio):
         if not self.running:
@@ -336,6 +391,22 @@ class VoiceHandler:
                 self.gui_callback("connection_error")
         except Exception as e:
             self.log(f"ERRO inesperado na escuta: {e}")
+
+    def _word_to_digit(self, text):
+        """Converte números escritos por extenso para dígitos ('quatro' → '4')."""
+        mapping = {
+            "um": "1", "uma": "1", "primeiro": "1", "primeira": "1",
+            "dois": "2", "duas": "2", "segundo": "2", "segunda": "2",
+            "três": "3", "tres": "3", "terceiro": "3", "terceira": "3",
+            "quatro": "4", "quarto": "4", "quarta": "4",
+            "cinco": "5", "quinto": "5", "quinta": "5",
+            "seis": "6", "sexto": "6", "sexta": "6",
+            "sete": "7", "sétimo": "7", "setimo": "7",
+            "oito": "8", "oitavo": "8",
+            "nove": "9", "nono": "9", "nona": "9",
+            "dez": "10", "décimo": "10", "decimo": "10",
+        }
+        return mapping.get(text.strip().lower(), text)
 
     def get_sorted_tasks(self):
         tasks = self.task_manager.read_tasks()
@@ -408,7 +479,7 @@ class VoiceHandler:
                     break
             
             if not content:
-                self.speak("O que deseja adicionar, senhor?")
+                self.speak("O que deseja adicionar senhor?")
                 return
 
             priority = "Média"
@@ -449,7 +520,7 @@ class VoiceHandler:
                     break
             
             if not target:
-                self.speak("Qual tarefa deseja concluir, senhor?")
+                self.speak("Qual tarefa deseja concluir senhor?")
                 return
 
             clean_target = target.lower().strip()
@@ -463,14 +534,14 @@ class VoiceHandler:
                 if not matched:
                     break
 
+            clean_target = self._word_to_digit(clean_target)
             completed_info = {"text": "", "found": False}
 
             def complete_cb(tasks_list):
-                priority_order = {"Alta": 1, "Média": 2, "Baixa": 3}
                 sorted_tasks = list(tasks_list)
                 sorted_tasks.sort(key=lambda t: (
-                    t.get("completed", False), 
-                    priority_order.get(t.get("priority", "Média"), 2),
+                    t.get("completed", False),
+                    t.get("sort_order", t.get("id", 0) * 10),
                     t.get("id", 0)
                 ))
                 
@@ -513,7 +584,7 @@ class VoiceHandler:
                     break
 
             if not target:
-                self.speak("Qual tarefa deseja remover, senhor?")
+                self.speak("Qual tarefa deseja remover senhor?")
                 return
 
             clean_target = target.lower().strip()
@@ -527,14 +598,14 @@ class VoiceHandler:
                 if not matched:
                     break
 
+            clean_target = self._word_to_digit(clean_target)
             deleted_info = {"text": ""}
 
             def delete_cb(tasks_list):
-                priority_order = {"Alta": 1, "Média": 2, "Baixa": 3}
                 sorted_tasks = list(tasks_list)
                 sorted_tasks.sort(key=lambda t: (
-                    t.get("completed", False), 
-                    priority_order.get(t.get("priority", "Média"), 2),
+                    t.get("completed", False),
+                    t.get("sort_order", t.get("id", 0) * 10),
                     t.get("id", 0)
                 ))
                 
@@ -584,6 +655,7 @@ class VoiceHandler:
                     break
             
             if sep_idx == -1:
+                self.log(f"Comando de edição sem separador 'para': '{target}'")
                 self.speak("Senhor, por favor indique a tarefa antiga e o novo texto usando 'para'.")
                 return
 
@@ -616,14 +688,14 @@ class VoiceHandler:
                 if not matched:
                     break
 
+            clean_search = self._word_to_digit(clean_search)
             edit_info = {"old_text": "", "priority_msg": ""}
 
             def edit_cb(tasks_list):
-                priority_order = {"Alta": 1, "Média": 2, "Baixa": 3}
                 sorted_tasks = list(tasks_list)
                 sorted_tasks.sort(key=lambda t: (
-                    t.get("completed", False), 
-                    priority_order.get(t.get("priority", "Média"), 2),
+                    t.get("completed", False),
+                    t.get("sort_order", t.get("id", 0) * 10),
                     t.get("id", 0)
                 ))
                 
@@ -699,15 +771,15 @@ class VoiceHandler:
             elif "baixa" in priority_val:
                 mapped_priority = "Baixa"
             
+            clean_search = self._word_to_digit(clean_search)
             if mapped_priority:
                 priority_info = {"text": ""}
 
                 def priority_cb(tasks_list):
-                    priority_order = {"Alta": 1, "Média": 2, "Baixa": 3}
                     sorted_tasks = list(tasks_list)
                     sorted_tasks.sort(key=lambda t: (
-                        t.get("completed", False), 
-                        priority_order.get(t.get("priority", "Média"), 2),
+                        t.get("completed", False),
+                        t.get("sort_order", t.get("id", 0) * 10),
                         t.get("id", 0)
                     ))
                     
@@ -742,12 +814,19 @@ class VoiceHandler:
                 return
 
         # --- COMMAND 6: LIST TASKS ---
-        list_keywords = ["quais são minhas tarefas", "quais sao minhas tarefas", "listar tarefas", "o que eu tenho para fazer", "o que eu tenho pra fazer", "ver tarefas", "mostrar tarefas"]
+        list_keywords = [
+            "quais são minhas tarefas", "quais sao minhas tarefas",
+            "listar tarefas", "listar minhas tarefas",
+            "o que eu tenho para fazer", "o que eu tenho pra fazer", "o que eu tenho que fazer",
+            "ver tarefas", "mostrar tarefas",
+            "quais são minhas", "quais sao minhas",
+            "minhas tarefas", "lista de tarefas", "liste as tarefas",
+        ]
         if any(kw in cmd_phrase for kw in list_keywords):
             tasks = self.task_manager.read_tasks()
             pending_tasks = [t for t in tasks if not t["completed"]]
             if not pending_tasks:
-                self.speak("Você não tem tarefas pendentes, senhor.")
+                self.speak("Você não tem tarefas pendentes senhor.")
                 return
             self.speak(f"Você tem {len(pending_tasks)} tarefas pendentes.")
             for i, t in enumerate(pending_tasks[:5]):
@@ -766,7 +845,7 @@ class VoiceHandler:
                 break
 
         if not content:
-            self.speak("O que deseja adicionar, senhor?")
+            self.speak("O que deseja adicionar senhor?")
             return
 
         priority = "Média"
@@ -815,7 +894,7 @@ class VoiceHandler:
                 self.gui_callback("api_key_missing")
             return
 
-        self.speak("Aguarde um momento, vou pesquisar...")
+        self.speak("Pesquisando...")
         
         def call_gemini():
             url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"

@@ -28,9 +28,17 @@ class TaskManager:
                         id INTEGER PRIMARY KEY,
                         text TEXT NOT NULL,
                         completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
-                        priority TEXT NOT NULL
+                        priority TEXT NOT NULL,
+                        sort_order INTEGER NOT NULL DEFAULT 0
                     )
                 """)
+                # Add sort_order to existing databases that don't have the column yet
+                try:
+                    conn.execute("ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+                except Exception:
+                    pass  # Column already exists
+                # Initialize sort_order for rows still at 0 (migration from old schema)
+                conn.execute("UPDATE tasks SET sort_order = id * 10 WHERE sort_order = 0")
                 conn.commit()
             except Exception as e:
                 print(f"[TaskManager] Error initializing database: {e}")
@@ -72,7 +80,7 @@ class TaskManager:
                 conn = sqlite3.connect(self.filepath)
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, text, completed, priority FROM tasks")
+                cursor.execute("SELECT id, text, completed, priority, sort_order FROM tasks")
                 rows = cursor.fetchall()
                 tasks = []
                 for row in rows:
@@ -80,7 +88,8 @@ class TaskManager:
                         "id": row["id"],
                         "text": row["text"],
                         "completed": bool(row["completed"]),
-                        "priority": row["priority"]
+                        "priority": row["priority"],
+                        "sort_order": row["sort_order"]
                     })
                 return tasks
             except Exception as e:
@@ -100,8 +109,8 @@ class TaskManager:
                 conn.execute("DELETE FROM tasks")
                 for t in tasks:
                     conn.execute(
-                        "INSERT INTO tasks (id, text, completed, priority) VALUES (?, ?, ?, ?)",
-                        (t["id"], t["text"], 1 if t["completed"] else 0, t["priority"])
+                        "INSERT INTO tasks (id, text, completed, priority, sort_order) VALUES (?, ?, ?, ?, ?)",
+                        (t["id"], t["text"], 1 if t["completed"] else 0, t["priority"], t.get("sort_order", t["id"] * 10))
                     )
                 conn.commit()
                 return True
